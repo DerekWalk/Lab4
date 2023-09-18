@@ -162,7 +162,7 @@ Based on our map the cities within the state of Florida had the highest relative
 ## Question 8
 
 ```{r}
-devtools::install_github("thomasp85/ggforce")
+install.packages("ggforce")
 library(ggforce)
 
 met_avg3 <- met[,.(rh = mean(rh,na.rm=TRUE), lat = mean(lat), lon = mean(lon)),  by=c("USAFID","region")]
