@@ -1,28 +1,176 @@
 ---
-title: ""
-author: ""
-format:
-  html:
-    embed-resources: true
+title: "Lab4"
+author: "Derek Walker"
+format: html
+editor: visual
+embed-resources: true
 ---
 
-## Quarto
+## Lab 4
 
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+## Question 1
 
-## Running Code
+```{r message=FALSE}
+library(data.table)
+library(dplyr)
+library(tidyverse)
+library(date)
 
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
-
-```{r}
-1 + 1
+if (!file.exists("met_all.gz"))
+  download.file(
+    url = "https://raw.githubusercontent.com/USCbiostats/data-science-data/master/02_met/met_all.gz",
+    destfile = "met_all.gz",
+    method   = "libcurl",
+    timeout  = 60
+    )
+met <- data.table::fread("met_all.gz")
 ```
 
-You can add options to executable code like this
+## Question 2
 
 ```{r}
-#| echo: false
-2 * 2
+str(met)
+attach(met)
+met <- met[met$temp > -17]
+colSums(met[,]==9999)
+
+met[met == 9999.0] <- NA
+colSums(is.na(met))
+attach(met)
+
+met$date <- paste(year, month, day, sep = "-")
+met$date <- as.Date(met$date)
+
+met$week<- data.table::week(met$date)
+met <- met[week==31|week==32]
+attach(met)
+
+#summary of relavent variables
+met_ss <- met %>% select(USAFID, day, hour, lat, lon, elev, wind.sp, temp, rh, wind.sp, vis.dist, dew.point)
+summary(met_ss)
+
+met_daily <- met[, .(
+  temp = mean(temp),
+  rh   = mean(rh),
+  lat  = mean(lat),
+  lon  = mean(lon),
+  wind.sp = mean(wind.sp),
+  vis.dist = mean(vis.dist),
+  dew.point = mean(dew.point)
+  ), by = c("USAFID", "day")][order(temp)]
+head(met_daily)
+
+met$region <-as.factor(ifelse(lon < -98 & lat < 39.71, "SW",
+                        ifelse(lon > -98 & lat < 39.71, "SE",
+                        ifelse(lon < -98 & lat > 39.71, "NW",
+                        ifelse(lon > -98 & lat > 39.71, "NE",NA)))))
+#based on THE NW,NE,SW,SE criteria we are left with 13 sites that are directly south of our 39.71 latitude and on the same longitude line -98, so I assigned it as "S - South".
+
+met[, elev_cat := fifelse(elev > 252, "high", "low")]
+attach(met)
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+## Question 3
+
+```{r}
+
+windspplot <- met[!is.na(region)] %>% ggplot() + 
+  geom_violin(mapping=aes(x=1, y=wind.sp, fill=region)) + facet_wrap(~region)
+windspplot
+
+dewptplot <- met[!is.na(region)] %>% ggplot() + 
+  geom_violin(mapping=aes(x=1, y=dew.point, fill=region)) + facet_wrap(~region)
+dewptplot
+```
+
+Based on the graph we see there is a lot of variation in the distribution of the southwestern and northwestern region. Both these regions have more observations that appear as outliers. The southeastern and northeastern regions have some sparseness in their variability and specifically the northeast region has a smaller range than the other regions.
+
+## Question 4
+
+```{r}
+p3 <- met[!is.na(region)] %>%
+  ggplot() + geom_jitter(aes(x=dew.point,y=wind.sp, color = region)) + stat_smooth(aes(dew.point, wind.sp, color=region)) +  scale_linetype_manual(values = c("dashed","dotted","solid","longdash" ))
+p3
+```
+
+In general the region with the highest average wind.sp based on dew point was the southwestern region. Genearlly the four regions have smooth curves that are fairly similar to one another. As we saw from the boxplots and now from these smooth curves the north eastern group had the highest minimum dew point of all the regions.
+
+## Question 5
+
+```{r}
+library(scales)
+p4 <- met[!is.na(region) & !is.na(elev_cat)] %>%
+  ggplot() +  geom_bar(mapping = aes(x = elev_cat, fill = region), position = "dodge") + scale_fill_brewer(palette = "Set2") + xlab("Elevation Category") + ylab("Number of Weather Readings")
+p4 + scale_y_continuous(labels = label_comma()) + labs(title="Number of weather Readings per Elevation Category Grouped by Region")
+```
+
+A majority of the weather station readings were from "low elevation" stations. The most low elevation readings came from the Southeast region and the most high elevation readings came from the Northeast region. If you have a good understanding of the United States map and topography, you could infer these readings are fairly accurate.
+
+## Question 6
+
+```{r}
+p5 <- met[!is.na(region)] %>% ggplot() + 
+    stat_summary(mapping = aes(x = region, y = dew.point), fun.data = mean_sdl) +
+      stat_summary(mapping = aes(x = region, y = dew.point), geom="errorbar", fun.data = mean_sdl) 
+
+p5
+
+p6 <- met[!is.na(region)] %>% ggplot() + 
+    stat_summary(mapping = aes(x = region, y = wind.sp), fun.data = mean_sdl) +
+      stat_summary(mapping = aes(x = region, y = wind.sp), geom="errorbar", fun.data = mean_sdl) 
+
+p6
+```
+
+The mean dew point was highest in the southeast region at about 22 units per measure and lowest in the northwest region at approximately 12.5 units per measure. There was large variability among these readings. Variation of the mean was lowest in the Southeast region.
+
+The mean wind speed was highest in the southwest region, at about 3.3 units per measure and the lowest in the southeast region at about 1.8 units per measure. Among all regions there was fairly high variability.
+
+## Question 7
+
+```{r}
+library(leaflet)
+met_avg2 <- met[,.(rh = mean(rh,na.rm=TRUE), lat = mean(lat), lon = mean(lon)),  by=c("USAFID")]
+met_avg2 <- met_avg2[!is.na(rh)]
+met_avg2 <- met_avg2[order(rh)]
+
+# Generating a color palette
+rh.pal <- colorNumeric(c('darkblue','goldenrod','red'), domain=met_avg2$rh)
+rh.pal
+
+rhmap <- leaflet(met_avg2) %>% 
+  # The looks of the Map
+  addProviderTiles('CartoDB.Positron') %>% 
+  # Some circles
+  addCircles(
+    lat = ~lat, lng=~lon,
+                                                  # HERE IS OUR PAL!
+    label = ~paste0(round(rh,2), ' C'), color = ~ rh.pal(rh),
+    opacity = 1, fillOpacity = 1, radius = 500
+    ) %>%
+  # And a pretty legend
+  addLegend('bottomleft', pal=rh.pal, values=met_avg2$rh,
+          title='Relative Humidity', opacity=1) %>%
+  addMarkers(data=tail(met_avg2,10), lng=~lon, lat=~lat)
+rhmap
+```
+
+Based on our map the cities within the state of Florida had the highest relative humidity percentage. In general, a majority of the highest humidity cities are in the Southeast. Though two of the ten highest readings were in California, many of the lower relative humidity readings were in fact in California and other parts of the Southwest.
+
+## Question 8
+
+```{r}
+devtools::install_github("thomasp85/ggforce")
+library(ggforce)
+
+met_avg3 <- met[,.(rh = mean(rh,na.rm=TRUE), lat = mean(lat), lon = mean(lon)),  by=c("USAFID","region")]
+met_avg3 <- met_avg3[!is.na(rh) &!is.na(region)]
+
+p7 <- ggplot(met_avg3, aes(lat, rh, color=region)) +
+  geom_point() + geom_smooth(mapping=aes(lat,rh)) + xlab("Latitidue Degree") + ylab("Relative Humidity Percentage") + labs(title="Latitude vs Relative Humidity ") +
+ facet_zoom(x = region == "NW")
+
+p7
+```
+
+It is known by many that the humidity levels increase significantly the closer you are to the Earth's equator and actually decreases the further north you travel. In an attempt to visually depict this relationship and test this association. Based on our plot we sort of have a tough time observing the hypothesized relationship stated previously. However, we do see a slight trend in that the relative humidity is generally higher on the east coast than on the west coast. Upon further research, this relationship does seem to be consistency with other knowledge.
